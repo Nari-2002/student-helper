@@ -1,5 +1,6 @@
 import streamlit as st
 import os
+import json
 from dotenv import load_dotenv
 from PyPDF2 import PdfReader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
@@ -15,92 +16,59 @@ import pyrebase
 import firebase_admin
 from firebase_admin import credentials, firestore
 
-# Load environment variables
+# Load env (local only)
 load_dotenv()
-os.environ["GOOGLE_API_KEY"] = os.getenv("GOOGLE_API_KEY")
+os.environ["GOOGLE_API_KEY"] = st.secrets["GOOGLE_API_KEY"]
 
-# Firebase config
-firebase_config = {
-    "apiKey": "AIzaSyASM9whKTNFBL4pXEEb29fNPI5qsscDoeg",
-    "authDomain": "doc-pro-ef358.firebaseapp.com",
-    "databaseURL": "https://doc-pro-ef358-default-rtdb.firebaseio.com",
-    "projectId": "doc-pro-ef358",
-    "storageBucket": "doc-pro-ef358.appspot.com",
-    "messagingSenderId": "302213029305",
-    "appId": "1:302213029305:web:d27c6b74042a0255de6a68",
-    "measurementId": "G-VDQZ0NTD4C"
-}
+# Firebase config from Streamlit secrets
+firebase_config = json.loads(st.secrets["FIREBASE_CONFIG"])
 
 firebase = pyrebase.initialize_app(firebase_config)
 auth = firebase.auth()
 
+# Firebase Admin SDK
 if not firebase_admin._apps:
-    cred = credentials.Certificate("serviceAccountKey.json")
+    firebase_creds = json.loads(st.secrets["FIREBASE_ADMIN"])
+    cred = credentials.Certificate(firebase_creds)
     firebase_admin.initialize_app(cred)
 
 db = firestore.client()
 
-st.set_page_config("PDF Student Assistant", layout="centered", page_icon="🔍")
+# UI config
+st.set_page_config(page_title="PDF Student Assistant", layout="centered", page_icon="🔍")
 
+# Styling
 st.markdown("""
-    <style>
-        .main { background-color: #f5f6fa; }
-        .stButton button {
-            background-color: #4CAF50;
-            color: white;
-            border-radius: 8px;
-            padding: 10px 20px;
-        }
-        .message {
-            border-radius: 8px;
-            padding: 10px;
-            margin: 10px 0;
-        }
-        .user-msg { text-align: right; color: black; }
-        .bot-msg { text-align: left; color: #2c3e50; }
-        .chat-container {
-            max-height: 450px;
-            overflow-y: auto;
-            padding: 10px;
-            margin-bottom: 70px;
-        }
-        .input-bar {
-            position: fixed;
-            bottom: 0;
-            left: 0;
-            width: 100%;
-            background-color: #f9f9f9;
-            padding: 10px 20px;
-            box-shadow: 0 -2px 8px rgba(0,0,0,0.1);
-            z-index: 999;
-        }
-        .input-bar input {
-            width: 80%;
-            padding: 10px;
-            border-radius: 8px;
-            border: 1px solid #ccc;
-            font-size: 16px;
-        }
-        .input-bar button {
-            padding: 10px 20px;
-            border-radius: 8px;
-            background-color: #4CAF50;
-            color: white;
-            font-size: 16px;
-            border: none;
-        }
-        .user-info {
-            position: fixed;
-            top: 10px;
-            right: 20px;
-            background-color: #f0f2f6;
-            padding: 8px 12px;
-            border-radius: 10px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-            font-size: 14px;
-            z-index: 9999;
-        }
-    </style>
+<style>
+.main { background-color: #f5f6fa; }
+.stButton button {
+    background-color: #4CAF50; color: white; border-radius: 8px; padding: 10px 20px;
+}
+.message {
+    border-radius: 8px; padding: 10px; margin: 10px 0;
+}
+.user-msg { text-align: right; color: black; }
+.bot-msg { text-align: left; color: #2c3e50; }
+.chat-container {
+    max-height: 450px; overflow-y: auto; padding: 10px; margin-bottom: 70px;
+}
+.input-bar {
+    position: fixed; bottom: 0; left: 0; width: 100%; background-color: #f9f9f9;
+    padding: 10px 20px; box-shadow: 0 -2px 8px rgba(0,0,0,0.1); z-index: 999;
+}
+.input-bar input {
+    width: 80%; padding: 10px; border-radius: 8px; border: 1px solid #ccc; font-size: 16px;
+}
+.input-bar button {
+    padding: 10px 20px; border-radius: 8px; background-color: #4CAF50; color: white;
+    font-size: 16px; border: none;
+}
+.user-info {
+    position: fixed; top: 10px; right: 20px; background-color: #f0f2f6;
+    padding: 8px 12px; border-radius: 10px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    font-size: 14px; z-index: 9999;
+}
+</style>
 """, unsafe_allow_html=True)
 
 def get_pdf_text(pdf_docs):
@@ -247,8 +215,6 @@ def main():
         st.session_state.chat_history = []
     if "raw_text" not in st.session_state:
         st.session_state.raw_text = ""
-    if "user_question" not in st.session_state:
-        st.session_state.user_question = ""
 
     pdf_docs = st.file_uploader(" Upload PDF Files", accept_multiple_files=True)
 
@@ -262,7 +228,7 @@ def main():
                 st.session_state.pdf_name = pdf_docs[0].name
                 st.success(" PDFs processed!")
 
-    col1, col2, col3, col4 = st.columns([1, 1, 1, 1])
+    col1, col2, col3 = st.columns([1, 1, 1])
     with col1:
         if st.session_state.raw_text and st.button(" Summarize"):
             summarize_document_and_respond(st.session_state.raw_text)
@@ -274,14 +240,11 @@ def main():
             st.session_state.chat_history.clear()
             st.success(" Cleared!")
 
-   # chat-container auto-scroll and latest message at bottom
     chat_html = "<div class='chat-container'>"
     for speaker, message in st.session_state.chat_history:
         align = "user-msg" if speaker == "You" else "bot-msg"
         chat_html += f"<div class='message {align}'><strong>{speaker}:</strong> {message}</div>"
     chat_html += "<div id='bottom-scroll'></div></div>"
-
-    # Display chat and auto-scroll to bottom
     st.markdown(chat_html, unsafe_allow_html=True)
     st.markdown("""
         <script>
@@ -290,13 +253,11 @@ def main():
         </script>
     """, unsafe_allow_html=True)
 
-
     with st.form("user_input_form", clear_on_submit=True):
         st.markdown("<div class='input-bar'>", unsafe_allow_html=True)
-        user_question = st.text_input(" Ask a question from the PDF content:", label_visibility="collapsed", key="user_question")
+        user_question = st.text_input(" Ask a question from the PDF content:", label_visibility="collapsed")
         submitted = st.form_submit_button("Send")
         st.markdown("</div>", unsafe_allow_html=True)
-
         if submitted and user_question.strip():
             user_input(user_question)
 
