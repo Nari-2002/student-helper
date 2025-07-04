@@ -1,7 +1,6 @@
 import streamlit as st
 import os
 import json
-from dotenv import load_dotenv
 from PyPDF2 import PdfReader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
