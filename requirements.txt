@@ -1,0 +1,9 @@
+streamlit
+python-dotenv
+PyPDF2
+reportlab
+pyrebase4
+firebase-admin
+langchain
+langchain-google-genai
+faiss-cpu
