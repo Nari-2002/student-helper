@@ -15,8 +15,7 @@ import pyrebase
 import firebase_admin
 from firebase_admin import credentials, firestore
 
-# Load env (local only)
-load_dotenv()
+
 os.environ["GOOGLE_API_KEY"] = st.secrets["GOOGLE_API_KEY"]
 
 # Firebase config from Streamlit secrets
