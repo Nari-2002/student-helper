@@ -39,8 +39,6 @@ cookies = EncryptedCookieManager(prefix="pdfchat_", password=os.getenv("COOKIE_S
 if not cookies.ready():
     st.stop()
 
-# UI Setup
-st.set_page_config(page_title="PDF Student Assistant", layout="centered", page_icon="🔍")
 
 # CSS Styling
 st.markdown("""
