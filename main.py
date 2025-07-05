@@ -14,8 +14,9 @@ from io import BytesIO
 import pyrebase
 import firebase_admin
 from firebase_admin import credentials, firestore
+from streamlit_cookies_manager import EncryptedCookieManager
 
-# API Keys
+# Load API Key
 os.environ["GOOGLE_API_KEY"] = st.secrets["GOOGLE_API_KEY"]
 
 # Firebase
@@ -23,93 +24,36 @@ firebase_config = json.loads(st.secrets["FIREBASE_CONFIG"])
 firebase = pyrebase.initialize_app(firebase_config)
 auth = firebase.auth()
 
-# Admin SDK for Firestore
 if not firebase_admin._apps:
     firebase_creds = json.loads(st.secrets["FIREBASE_ADMIN"])
     cred = credentials.Certificate(firebase_creds)
     firebase_admin.initialize_app(cred)
 db = firestore.client()
 
-# Streamlit UI
-st.set_page_config("PDF Student Assistant", layout="centered", page_icon="🔍")
-st.markdown("""<style>
+# Cookie Setup
+cookies = EncryptedCookieManager(prefix="pdfchat_", password=os.getenv("COOKIE_SECRET", "supersecret"))
+if not cookies.ready():
+    st.stop()
+
+# UI Setup
+st.set_page_config(page_title="PDF Student Assistant", layout="centered", page_icon="🔍")
+
+# CSS Styling
+st.markdown("""
+<style>
 .main { background-color: #f5f6fa; }
-.stButton button {
-    background-color: #4CAF50; color: white; border-radius: 8px; padding: 10px 20px;
-}
-.message {
-    border-radius: 8px; padding: 10px; margin: 10px 0;
-}
+.stButton button { background-color: #4CAF50; color: white; border-radius: 8px; padding: 10px 20px; }
+.message { border-radius: 8px; padding: 10px; margin: 10px 0; }
 .user-msg { text-align: right; color: black; }
 .bot-msg { text-align: left; color: #2c3e50; }
-.chat-container {
-    max-height: 450px; overflow-y: auto; padding: 10px; margin-bottom: 70px;
-}
-.input-bar {
-    position: fixed; bottom: 0; left: 0; width: 100%; background-color: #f9f9f9;
-    padding: 10px 20px; box-shadow: 0 -2px 8px rgba(0,0,0,0.1); z-index: 999;
-}
-.input-bar input {
-    width: 80%; padding: 10px; border-radius: 8px; border: 1px solid #ccc; font-size: 16px;
-}
-.input-bar button {
-    padding: 10px 20px; border-radius: 8px; background-color: #4CAF50; color: white;
-    font-size: 16px; border: none;
-}
-.user-info {
-    position: fixed; top: 10px; right: 20px; background-color: #f0f2f6;
-    padding: 8px 12px; border-radius: 10px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-    font-size: 14px; z-index: 9999;
-}
-</style>""", unsafe_allow_html=True)
+.chat-container { max-height: 450px; overflow-y: auto; padding: 10px; margin-bottom: 70px; }
+.input-bar { position: fixed; bottom: 0; left: 0; width: 100%; background-color: #f9f9f9; padding: 10px 20px; box-shadow: 0 -2px 8px rgba(0,0,0,0.1); z-index: 999; }
+.input-bar input { width: 80%; padding: 10px; border-radius: 8px; border: 1px solid #ccc; font-size: 16px; }
+.input-bar button { padding: 10px 20px; border-radius: 8px; background-color: #4CAF50; color: white; font-size: 16px; border: none; }
+.user-info { position: fixed; top: 10px; right: 20px; background-color: #f0f2f6; padding: 8px 12px; border-radius: 10px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); font-size: 14px; z-index: 9999; }
+</style>
+""", unsafe_allow_html=True)
 
-# === Firebase Auth Helpers ===
-def refresh_user_token():
-    try:
-        user = auth.refresh(st.session_state.refresh_token)
-        info = auth.get_account_info(user['idToken'])
-        st.session_state.user = {
-            "email": info['users'][0]['email'],
-            "localId": info['users'][0]['localId'],
-            "idToken": user['idToken'],
-            "refreshToken": user['refreshToken']
-        }
-    except Exception:
-        st.warning("Session expired. Please login again.")
-        st.session_state.clear()
-        st.rerun()
-
-def show_login():
-    st.title("Login to PDF Assistant")
-    email = st.text_input("Email")
-    password = st.text_input("Password", type="password")
-    login = st.button("Login")
-    register = st.button("Register")
-
-    if login:
-        try:
-            user = auth.sign_in_with_email_and_password(email, password)
-            info = auth.get_account_info(user['idToken'])
-            st.session_state.user = {
-                "email": info['users'][0]['email'],
-                "localId": info['users'][0]['localId'],
-                "idToken": user['idToken'],
-                "refreshToken": user['refreshToken']
-            }
-            st.session_state.refresh_token = user['refreshToken']
-            st.success("Login successful!")
-            st.experimental_rerun()
-        except Exception as e:
-            st.error(f"Login failed: {e}")
-
-    if register:
-        try:
-            auth.create_user_with_email_and_password(email, password)
-            st.success("Registered. Now login.")
-        except Exception as e:
-            st.error(f"Registration failed: {e}")
-
-# === PDF + LangChain Functions ===
 def get_pdf_text(pdf_docs):
     text = ""
     for pdf in pdf_docs:
@@ -177,13 +121,11 @@ def save_chat_to_firebase(user_id, pdf_name="General"):
         ref = db.collection("chats").document(user_id).collection("pdfs").document(pdf_name)
         chat_history = st.session_state.chat_history[-50:]
         ref.set({
-            "chat_history": [
-                {"speaker": str(s), "message": str(m)} for s, m in chat_history
-            ],
+            "chat_history": [{"speaker": str(s), "message": str(m)} for s, m in chat_history],
             "timestamp": firestore.SERVER_TIMESTAMP
         })
     except Exception as e:
-        st.error(f"Error saving chat: {e}")
+        st.error(f"Error saving chat to Firestore: {e}")
 
 def generate_pdf(chat_history):
     buffer = BytesIO()
@@ -200,51 +142,97 @@ def generate_pdf(chat_history):
     buffer.seek(0)
     return buffer
 
+def show_login():
+    st.title(" Login to PDF Assistant")
+    email = st.text_input("Email")
+    password = st.text_input("Password", type="password")
+
+    if st.button("Login"):
+        try:
+            user = auth.sign_in_with_email_and_password(email, password)
+            info = auth.get_account_info(user['idToken'])
+            st.session_state.user = {
+                "email": info['users'][0]['email'],
+                "localId": info['users'][0]['localId'],
+                "idToken": user['idToken'],
+                "refreshToken": user['refreshToken']
+            }
+            cookies["refresh_token"] = user['refreshToken']
+            cookies["email"] = info['users'][0]['email']
+            cookies["localId"] = info['users'][0]['localId']
+            cookies.save()
+            st.rerun()
+        except Exception as e:
+            st.error(f"Login failed: {e}")
+
+    if st.button("Register"):
+        try:
+            user = auth.create_user_with_email_and_password(email, password)
+            st.success(" Registered. Now log in.")
+        except Exception as e:
+            st.error(f"Registration failed: {e}")
+
+def auto_login():
+    if "user" not in st.session_state and "refresh_token" in cookies:
+        try:
+            user = auth.refresh(cookies["refresh_token"])
+            info = auth.get_account_info(user['idToken'])
+            st.session_state.user = {
+                "email": info['users'][0]['email'],
+                "localId": info['users'][0]['localId'],
+                "idToken": user['idToken'],
+                "refreshToken": user['refreshToken']
+            }
+        except:
+            cookies.clear()
+            cookies.save()
+
 def view_past_chats():
-    if st.button("Back"):
+    if st.button(" Back"):
         st.session_state['viewing_past_chats'] = False
         st.experimental_rerun()
+
     user_id = st.session_state.user['localId']
     chats_ref = db.collection("chats").document(user_id).collection("pdfs")
-    for doc in chats_ref.stream():
-        st.markdown(f"### {doc.id}")
+    docs = chats_ref.stream()
+
+    for doc in docs:
+        st.markdown(f"###  {doc.id}")
         for item in doc.to_dict().get("chat_history", []):
             st.markdown(f"**{item['speaker']}:** {item['message']}")
         st.markdown("---")
 
-# === MAIN UI ===
 def main():
+    auto_login()
     if "user" not in st.session_state:
-        if "refresh_token" in st.session_state:
-            refresh_user_token()
-        else:
-            show_login()
-            return
+        show_login()
+        return
 
-    user_email = st.session_state.user["email"]
+    user_email = st.session_state.user.get("email", "Unknown User")
     st.markdown(f"<div class='user-info'> {user_email}</div>", unsafe_allow_html=True)
 
-    st.sidebar.title("Menu")
-    st.sidebar.markdown(f"Logged in as: **{user_email}**")
-
-    if st.sidebar.button("Logout"):
+    st.sidebar.title(" Menu")
+    st.sidebar.markdown(f" Logged in as: **{user_email}**")
+    if st.sidebar.button(" Logout"):
         st.session_state.clear()
+        cookies.clear()
+        cookies.save()
         st.rerun()
 
-    if st.sidebar.button("View Past Chats"):
+    if st.sidebar.button(" View Past Chats"):
         view_past_chats()
         return
 
-    st.title("Chat with PDF – Gemini AI")
+    st.title(" Chat with PDF – Gemini AI")
 
     if "chat_history" not in st.session_state:
         st.session_state.chat_history = []
     if "raw_text" not in st.session_state:
         st.session_state.raw_text = ""
 
-    pdf_docs = st.file_uploader("Upload PDF Files", accept_multiple_files=True)
+    pdf_docs = st.file_uploader(" Upload PDF Files", accept_multiple_files=True)
 
-    if st.button("Submit PDFs"):
+    if st.button(" Submit PDFs"):
         if pdf_docs:
             with st.spinner("Processing PDFs..."):
                 raw_text = get_pdf_text(pdf_docs)
@@ -252,19 +240,19 @@ def main():
                 get_vector_store(chunks)
                 st.session_state.raw_text = raw_text
                 st.session_state.pdf_name = pdf_docs[0].name
-                st.success("PDFs processed!")
+                st.success(" PDFs processed!")
 
-    col1, col2, col3 = st.columns(3)
+    col1, col2, col3 = st.columns([1, 1, 1])
     with col1:
-        if st.session_state.raw_text and st.button("Summarize"):
+        if st.session_state.raw_text and st.button(" Summarize"):
             summarize_document_and_respond(st.session_state.raw_text)
     with col2:
-        if st.session_state.raw_text and st.button("Key Concepts"):
+        if st.session_state.raw_text and st.button(" Key Concepts"):
             extract_concepts_and_respond(st.session_state.raw_text)
     with col3:
-        if st.button("Clear All"):
+        if st.button(" Clear All"):
             st.session_state.chat_history.clear()
-            st.success("Chat cleared!")
+            st.success(" Cleared!")
 
     chat_html = "<div class='chat-container'>"
     for speaker, message in st.session_state.chat_history:
@@ -281,7 +269,7 @@ def main():
 
     with st.form("user_input_form", clear_on_submit=True):
         st.markdown("<div class='input-bar'>", unsafe_allow_html=True)
-        user_question = st.text_input("Ask a question from the PDF:", label_visibility="collapsed")
+        user_question = st.text_input(" Ask a question from the PDF content:", label_visibility="collapsed")
         submitted = st.form_submit_button("Send")
         st.markdown("</div>", unsafe_allow_html=True)
         if submitted and user_question.strip():
@@ -289,7 +277,7 @@ def main():
 
     if st.session_state.chat_history:
         pdf = generate_pdf(st.session_state.chat_history)
-        st.download_button("Download Chat", data=pdf, file_name="chat_history.pdf", mime="application/pdf")
+        st.download_button(" Download Chat", data=pdf, file_name="chat_history.pdf", mime="application/pdf")
 
 if __name__ == "__main__":
     main()
