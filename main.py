@@ -132,11 +132,17 @@ def extract_concepts_and_respond(text):
     save_chat_to_firebase(st.session_state.user['localId'], st.session_state.get("pdf_name", "General"))
 
 def save_chat_to_firebase(user_id, pdf_name="General"):
-    ref = db.collection("chats").document(user_id).collection("pdfs").document(pdf_name)
-    ref.set({
-        "chat_history": [{"speaker": s, "message": m} for s, m in st.session_state.chat_history],
-        "timestamp": firestore.SERVER_TIMESTAMP
-    })
+    try:
+        ref = db.collection("chats").document(user_id).collection("pdfs").document(pdf_name)
+        chat_history = st.session_state.chat_history[-50:]  # limit size
+        ref.set({
+            "chat_history": [
+                {"speaker": str(s), "message": str(m)} for s, m in chat_history
+            ],
+            "timestamp": firestore.SERVER_TIMESTAMP
+        })
+    except Exception as e:
+        st.error(f"Error saving chat to Firestore: {e}")
 
 def generate_pdf(chat_history):
     buffer = BytesIO()
