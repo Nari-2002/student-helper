@@ -16,8 +16,12 @@ import firebase_admin
 from firebase_admin import credentials, firestore
 from streamlit_cookies_manager import EncryptedCookieManager
 
+# ✅ This must come FIRST before any st.* calls!
+st.set_page_config(page_title="PDF Student Assistant", layout="centered", page_icon="🔍")
+
 # Load API Key
 os.environ["GOOGLE_API_KEY"] = st.secrets["GOOGLE_API_KEY"]
+
 
 # Firebase
 firebase_config = json.loads(st.secrets["FIREBASE_CONFIG"])
