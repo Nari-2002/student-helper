@@ -15,16 +15,15 @@ import pyrebase
 import firebase_admin
 from firebase_admin import credentials, firestore
 
-
+# Load secrets
 os.environ["GOOGLE_API_KEY"] = st.secrets["GOOGLE_API_KEY"]
-
-# Firebase config from Streamlit secrets
 firebase_config = json.loads(st.secrets["FIREBASE_CONFIG"])
 
+# Initialize Firebase
 firebase = pyrebase.initialize_app(firebase_config)
 auth = firebase.auth()
 
-# Firebase Admin SDK
+# Initialize Firebase Admin SDK
 if not firebase_admin._apps:
     firebase_creds = json.loads(st.secrets["FIREBASE_ADMIN"])
     cred = credentials.Certificate(firebase_creds)
@@ -32,10 +31,10 @@ if not firebase_admin._apps:
 
 db = firestore.client()
 
-# UI config
+# UI Config
 st.set_page_config(page_title="PDF Student Assistant", layout="centered", page_icon="🔍")
 
-# Styling
+# CSS
 st.markdown("""
 <style>
 .main { background-color: #f5f6fa; }
@@ -68,6 +67,9 @@ st.markdown("""
 }
 </style>
 """, unsafe_allow_html=True)
+
+
+# ---------------- Core Functions ---------------- #
 
 def get_pdf_text(pdf_docs):
     text = ""
@@ -136,9 +138,7 @@ def save_chat_to_firebase(user_id, pdf_name="General"):
         ref = db.collection("chats").document(user_id).collection("pdfs").document(pdf_name)
         chat_history = st.session_state.chat_history[-50:]  # limit size
         ref.set({
-            "chat_history": [
-                {"speaker": str(s), "message": str(m)} for s, m in chat_history
-            ],
+            "chat_history": [{"speaker": str(s), "message": str(m)} for s, m in chat_history],
             "timestamp": firestore.SERVER_TIMESTAMP
         })
     except Exception as e:
@@ -159,8 +159,23 @@ def generate_pdf(chat_history):
     buffer.seek(0)
     return buffer
 
+def refresh_user_token():
+    try:
+        user = auth.refresh(st.session_state.refresh_token)
+        st.session_state.user = user
+        st.session_state.id_token = user['idToken']
+        st.session_state.refresh_token = user['refreshToken']
+        st.session_state.token_expiry = user['expiresIn']
+    except Exception:
+        st.warning("Session expired. Please log in again.")
+        for key in list(st.session_state.keys()):
+            del st.session_state[key]
+        st.rerun()
+
+# ---------------- Authentication UI ---------------- #
+
 def show_login():
-    st.title(" Login to PDF Assistant")
+    st.title("Login to PDF Assistant")
     email = st.text_input("Email")
     password = st.text_input("Password", type="password")
 
@@ -168,6 +183,9 @@ def show_login():
         try:
             user = auth.sign_in_with_email_and_password(email, password)
             st.session_state.user = user
+            st.session_state.id_token = user['idToken']
+            st.session_state.refresh_token = user['refreshToken']
+            st.session_state.token_expiry = user['expiresIn']
             st.rerun()
         except Exception as e:
             st.error(f"Login failed: {e}")
@@ -175,12 +193,12 @@ def show_login():
     if st.button("Register"):
         try:
             user = auth.create_user_with_email_and_password(email, password)
-            st.success(" Registered. Now log in.")
+            st.success("Registered. Now log in.")
         except Exception as e:
             st.error(f"Registration failed: {e}")
 
 def view_past_chats():
-    if st.button(" Back"):
+    if st.button("Back"):
         st.session_state['viewing_past_chats'] = False
         st.experimental_rerun()
 
@@ -189,40 +207,46 @@ def view_past_chats():
     docs = chats_ref.stream()
 
     for doc in docs:
-        st.markdown(f"###  {doc.id}")
+        st.markdown(f"### {doc.id}")
         for item in doc.to_dict().get("chat_history", []):
             st.markdown(f"**{item['speaker']}:** {item['message']}")
         st.markdown("---")
 
+# ---------------- Main App ---------------- #
+
 def main():
-    if "user" not in st.session_state:
+    if "user" in st.session_state:
+        refresh_user_token()
+    elif "refresh_token" in st.session_state:
+        refresh_user_token()
+    else:
         show_login()
         return
 
     user_email = st.session_state.user.get("email", "Unknown User")
-    st.markdown(f"<div class='user-info'> {user_email}</div>", unsafe_allow_html=True)
+    st.markdown(f"<div class='user-info'>{user_email}</div>", unsafe_allow_html=True)
 
-    st.sidebar.title(" Menu")
-    st.sidebar.markdown(f" Logged in as: **{user_email}**")
-    if st.sidebar.button(" Logout"):
-        for key in list(st.session_state.keys()):
-            del st.session_state[key]
+    st.sidebar.title("Menu")
+    st.sidebar.markdown(f"Logged in as: **{user_email}**")
+    if st.sidebar.button("Logout"):
+        for key in ["user", "refresh_token", "id_token", "token_expiry", "chat_history", "raw_text", "pdf_name"]:
+            st.session_state.pop(key, None)
         st.rerun()
 
-    if st.sidebar.button(" View Past Chats"):
+    if st.sidebar.button("View Past Chats"):
         view_past_chats()
         return
 
-    st.title(" Chat with PDF – Gemini AI")
+    st.title("Chat with PDF – Gemini AI")
 
     if "chat_history" not in st.session_state:
         st.session_state.chat_history = []
     if "raw_text" not in st.session_state:
         st.session_state.raw_text = ""
 
-    pdf_docs = st.file_uploader(" Upload PDF Files", accept_multiple_files=True)
+    pdf_docs = st.file_uploader("Upload PDF Files", accept_multiple_files=True)
 
-    if st.button(" Submit PDFs"):
+    if st.button("Submit PDFs"):
         if pdf_docs:
             with st.spinner("Processing PDFs..."):
                 raw_text = get_pdf_text(pdf_docs)
@@ -230,19 +254,19 @@ def main():
                 get_vector_store(chunks)
                 st.session_state.raw_text = raw_text
                 st.session_state.pdf_name = pdf_docs[0].name
-                st.success(" PDFs processed!")
+                st.success("PDFs processed!")
 
     col1, col2, col3 = st.columns([1, 1, 1])
     with col1:
-        if st.session_state.raw_text and st.button(" Summarize"):
+        if st.session_state.raw_text and st.button("Summarize"):
             summarize_document_and_respond(st.session_state.raw_text)
     with col2:
-        if st.session_state.raw_text and st.button(" Key Concepts"):
+        if st.session_state.raw_text and st.button("Key Concepts"):
             extract_concepts_and_respond(st.session_state.raw_text)
     with col3:
-        if st.button(" Clear All"):
+        if st.button("Clear All"):
             st.session_state.chat_history.clear()
-            st.success(" Cleared!")
+            st.success("Cleared!")
 
     chat_html = "<div class='chat-container'>"
     for speaker, message in st.session_state.chat_history:
@@ -250,6 +274,7 @@ def main():
         chat_html += f"<div class='message {align}'><strong>{speaker}:</strong> {message}</div>"
     chat_html += "<div id='bottom-scroll'></div></div>"
     st.markdown(chat_html, unsafe_allow_html=True)
+
     st.markdown("""
         <script>
             var objDiv = document.querySelector('.chat-container');
@@ -259,7 +284,7 @@ def main():
 
     with st.form("user_input_form", clear_on_submit=True):
         st.markdown("<div class='input-bar'>", unsafe_allow_html=True)
-        user_question = st.text_input(" Ask a question from the PDF content:", label_visibility="collapsed")
+        user_question = st.text_input("Ask a question from the PDF content:", label_visibility="collapsed")
         submitted = st.form_submit_button("Send")
         st.markdown("</div>", unsafe_allow_html=True)
         if submitted and user_question.strip():
@@ -267,7 +292,8 @@ def main():
 
     if st.session_state.chat_history:
         pdf = generate_pdf(st.session_state.chat_history)
-        st.download_button(" Download Chat", data=pdf, file_name="chat_history.pdf", mime="application/pdf")
+        st.download_button("Download Chat", data=pdf, file_name="chat_history.pdf", mime="application/pdf")
+
 
 if __name__ == "__main__":
     main()
